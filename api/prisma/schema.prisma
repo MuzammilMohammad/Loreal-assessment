@@ -1,0 +1,39 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AssessmentVerdict {
+  JUSTIFIED
+  NOT_JUSTIFIED
+  INCONCLUSIVE
+}
+
+model Claim {
+  id          String       @id @default(cuid())
+  text        String
+  productName String
+  population  String?
+  createdAt   DateTime     @default(now())
+  assessments Assessment[]
+}
+
+model Assessment {
+  id             String            @id @default(cuid())
+  claimId        String
+  claim          Claim             @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  evidence       String            @db.Text
+  verdict        AssessmentVerdict
+  confidence     Float
+  reasoning      String            @db.Text
+  limitations    String[]
+  model          String
+  isDemo         Boolean           @default(false)
+  createdAt      DateTime          @default(now())
+
+  @@index([claimId, createdAt])
+}

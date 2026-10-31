@@ -1,0 +1,11 @@
+{
+  "name": "claims-engine-web",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --configLoader runner --host 0.0.0.0",
+    "build": "tsc -b && vite build --configLoader runner"
+  },
+  "dependencies": { "react": "^19.1.1", "react-dom": "^19.1.1" },
+  "devDependencies": { "@types/react": "^19.1.13", "@types/react-dom": "^19.1.9", "@vitejs/plugin-react": "^5.0.4", "typescript": "^5.9.3", "vite": "^7.1.9" }
+}
