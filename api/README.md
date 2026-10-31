@@ -25,9 +25,27 @@ For local web development, requests from localhost are allowed on Vite's default
 
 ### `POST /api/claims/assess`
 
-Send `productName`, `claimText`, `evidence`, and optional `population`. The API creates a Claim and its first Assessment and returns the saved rows.
+Create a Claim and its first Assessment by sending `productName`, `claimText`, `evidence`, and optional `population`:
 
-To add a new assessment to an existing claim, include its `claimId` in the same request. A missing ID returns 404 before calling the model. Each successful request adds an Assessment and keeps the claim's existing history.
+```json
+{
+  "productName": "Revitalift sample serum",
+  "claimText": "Reduces wrinkles by 20% in 4 weeks",
+  "population": "Adults aged 40–65",
+  "evidence": "A de-identified study summary with its design, sample size, outcome, effect size, and statistical results."
+}
+```
+
+To assess a saved Claim again, send only `claimId` and the new `evidence`:
+
+```json
+{
+  "claimId": "claim-id-from-a-previous-response",
+  "evidence": "A new de-identified study summary."
+}
+```
+
+The API checks the ID and loads the original claim wording, product name, and population from PostgreSQL before calling the model. A missing ID returns 404 before the model is called. Each successful request adds an Assessment and keeps the claim's existing history.
 
 ### `GET /api/claims`
 
@@ -65,7 +83,7 @@ Do not submit patient-identifiable information. The system stores the supplied e
 | `npm install` | Install packages and generate Prisma Client |
 | `npm run dev` | Start/check local PostgreSQL, apply migrations, and run the API |
 | `npm run build` | Compile NestJS into `dist` |
-| `npm test` | Build and run the backend behavior tests |
+| `npm test` | Run the backend unit and HTTP controller tests |
 | `npm run db:generate` | Regenerate Prisma Client after editing the schema; stop the API first on Windows |
 | `npm run db:migrate -- --name <change>` | Create and apply a development migration |
 | `npm run db:deploy` | Apply committed migrations |
@@ -83,7 +101,14 @@ Keep API keys in this project's `.env`. Never put them in React configuration, `
 
 ## Tests
 
-`npm test` covers DTO validation, successful creation, reassessment of an existing claim, missing claim IDs, provider failure and timeout, invalid model output, database failure, and multiple assessments staying attached to one claim. Tests use the Node built-in test runner and do not require PostgreSQL or API keys.
+Build before running tests:
+
+```powershell
+npm run build
+npm test
+```
+
+Unit tests cover service behavior such as claim creation, reassessment, unknown claims, provider failures and timeouts, invalid model output, database errors, and multiple assessments staying attached to one claim. HTTP controller tests start NestJS on a temporary local port and send requests through the real route and validation pipe. They use mocked Prisma and model providers. These tests do not connect to PostgreSQL or external model APIs; there are no database integration tests in this project yet. Tests use Node's built-in test runner and need no additional test dependencies.
 
 ## Limits
 

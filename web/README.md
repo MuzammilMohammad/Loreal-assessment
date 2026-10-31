@@ -18,7 +18,7 @@ Open the URL printed by Vite, normally `http://localhost:5173`. The API must run
 - Checks required form fields and disables submission while the API request is running.
 - Displays the verdict, confidence, reasoning, evidence limitations, and whether the response came from demo mode.
 - Loads saved claims and fetches assessment details when a claim is expanded.
-- Lets the evaluator start another assessment for a saved claim. The next request includes its `claimId`, so it adds to that claim's history.
+- Lets the evaluator start another assessment for a saved claim. The request sends only the saved `claimId` and new `evidence`; the API loads the original claim details and adds the assessment to its history.
 
 The browser never receives the model key or database URL. Use de-identified study summaries only.
 

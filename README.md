@@ -64,14 +64,11 @@ Create a claim with its first assessment:
 }
 ```
 
-To assess an existing claim again, send its ID with the same fields:
+To assess an existing claim again, send only its ID and the new evidence. The API loads the claim wording, product name, and population from PostgreSQL:
 
 ```json
 {
   "claimId": "claim-id-from-a-previous-response",
-  "productName": "Revitalift sample serum",
-  "claimText": "Reduces wrinkles by 20% in 4 weeks",
-  "population": "Adults aged 40–65",
   "evidence": "A new de-identified study summary."
 }
 ```
@@ -164,10 +161,11 @@ OpenAI is the default in `.env.example` to match the assignment. Use a key with 
 
 ## Tests and build
 
-Run backend behavior tests and compile the API:
+Build the API, then run its backend tests:
 
 ```powershell
 cd api
+npm run build
 npm test
 ```
 
@@ -178,7 +176,9 @@ cd web
 npm run build
 ```
 
-The backend tests cover DTO validation, claim creation and reassessment, missing claims, provider failures and timeouts, invalid model output, database errors, and preserving multiple assessments on one claim. The web project has no separate component-test runner configured; its production build is checked with TypeScript and Vite.
+The backend suite has unit tests for the service and provider error paths, plus HTTP controller tests that start a Nest app on an ephemeral local port and exercise the real route and `ValidationPipe`. Prisma and model providers are mocked in these tests. They do not connect to PostgreSQL or external model APIs, so this project does not currently have database integration tests. The web project has no separate component-test runner configured; its production build is checked with TypeScript and Vite.
+
+GitHub Actions runs `npm ci`, Prisma Client generation, the API build and backend tests, then installs and builds the web app. It does not need API keys or a live database.
 
 ## Research performed and design decisions
 

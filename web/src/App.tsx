@@ -51,10 +51,11 @@ export default function App() {
       const response = await fetch(`${API_BASE_URL}/api/claims/assess`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...formValues,
-          ...(reassessmentClaimId ? { claimId: reassessmentClaimId } : {}),
-        }),
+        body: JSON.stringify(
+          reassessmentClaimId
+            ? { claimId: reassessmentClaimId, evidence: formValues.evidence }
+            : formValues,
+        ),
       });
 
       const responseText = await response.text();

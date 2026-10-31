@@ -5,9 +5,13 @@ const { validate } = require('class-validator');
 const {
   BadGatewayException,
   GatewayTimeoutException,
+  Module,
   NotFoundException,
   ServiceUnavailableException,
+  ValidationPipe,
 } = require('@nestjs/common');
+const { NestFactory } = require('@nestjs/core');
+const { ClaimsController } = require('../dist/claims/claims.controller');
 const { ClaimsService } = require('../dist/claims/claims.service');
 const { AssessClaimDto } = require('../dist/claims/dto/assess-claim.dto');
 const { OpenAIAssessmentProvider } = require('../dist/claims/providers/openai-assessment.provider');
@@ -75,6 +79,38 @@ function withProvider(provider, run) {
     });
 }
 
+async function withHttpApi(service, run) {
+  class ClaimsHttpTestModule {}
+  Module({
+    controllers: [ClaimsController],
+    providers: [{ provide: ClaimsService, useValue: service }],
+  })(ClaimsHttpTestModule);
+
+  const app = await NestFactory.create(ClaimsHttpTestModule, { logger: false });
+  app.setGlobalPrefix('api');
+  app.useGlobalPipes(new ValidationPipe({
+    whitelist: true,
+    forbidNonWhitelisted: true,
+    transform: true,
+  }));
+  await app.listen(0, '127.0.0.1');
+  const address = app.getHttpServer().address();
+
+  try {
+    await run(`http://127.0.0.1:${address.port}`);
+  } finally {
+    await app.close();
+  }
+}
+
+async function postAssessment(baseUrl, body) {
+  return fetch(`${baseUrl}/api/claims/assess`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
 test('rejects missing fields and undeclared request properties', async () => {
   const dto = plainToInstance(AssessClaimDto, {
     productName: validRequest.productName,
@@ -89,6 +125,19 @@ test('rejects missing fields and undeclared request properties', async () => {
   assert.ok(errors.some((error) => error.property === 'claimText'));
   assert.ok(errors.some((error) => error.property === 'evidence'));
   assert.ok(errors.some((error) => error.property === 'unexpected'));
+});
+
+test('validates reassessment requests with only a claim ID and evidence', async () => {
+  const dto = plainToInstance(AssessClaimDto, {
+    claimId: 'claim-123',
+    evidence: validRequest.evidence,
+  });
+  const errors = await validate(dto, {
+    whitelist: true,
+    forbidNonWhitelisted: true,
+  });
+
+  assert.deepEqual(errors, []);
 });
 
 test('creates a claim and returns its saved assessment', async () => {
@@ -327,4 +376,153 @@ test('keeps successive assessments attached to the same claim', async () => {
 test('returns 404 when assessment history is requested for an unknown claim', async () => {
   const service = new ClaimsService(createPrisma(), {}, {});
   await assert.rejects(service.history('missing-claim'), NotFoundException);
+});
+
+test('HTTP: creates a claim through POST /api/claims/assess', async () => {
+  await withProvider('demo', async () => {
+    let savedInput;
+    const prisma = createPrisma({
+      saveAssessment: async (input) => {
+        savedInput = input;
+        return createPrisma().saveAssessment(input);
+      },
+    });
+    await withHttpApi(new ClaimsService(prisma, {}, {}), async (baseUrl) => {
+      const response = await postAssessment(baseUrl, validRequest);
+      const data = await response.json();
+
+      assert.equal(response.status, 201);
+      assert.equal(data.claimId, 'new-claim');
+      assert.equal(data.assessment.isDemo, true);
+    });
+    assert.equal(savedInput.claimId, undefined);
+    assert.equal(savedInput.claimText, validRequest.claimText);
+  });
+});
+
+test('HTTP: reassesses an existing claim with only its ID and new evidence', async () => {
+  await withProvider('demo', async () => {
+    let savedInput;
+    const prisma = createPrisma({
+      findClaimById: async (id) => ({
+        id,
+        text: 'Claim wording from PostgreSQL',
+        productName: 'Product from PostgreSQL',
+        population: 'Population from PostgreSQL',
+      }),
+      saveAssessment: async (input) => {
+        savedInput = input;
+        return {
+          id: input.claimId,
+          text: input.claimText,
+          productName: input.productName,
+          assessment: { id: 'assessment-new', claimId: input.claimId },
+        };
+      },
+    });
+
+    await withHttpApi(new ClaimsService(prisma, {}, {}), async (baseUrl) => {
+      const response = await postAssessment(baseUrl, {
+        claimId: 'claim-123',
+        evidence: validRequest.evidence,
+      });
+      const data = await response.json();
+
+      assert.equal(response.status, 201);
+      assert.equal(data.claimId, 'claim-123');
+      assert.equal(data.claim, 'Claim wording from PostgreSQL');
+    });
+
+    assert.equal(savedInput.claimId, 'claim-123');
+    assert.equal(savedInput.claimText, 'Claim wording from PostgreSQL');
+    assert.equal(savedInput.productName, 'Product from PostgreSQL');
+    assert.equal(savedInput.population, 'Population from PostgreSQL');
+    assert.equal(savedInput.evidence, validRequest.evidence);
+  });
+});
+
+test('HTTP: returns 404 when reassessing a claim that does not exist', async () => {
+  await withProvider('openai', async () => {
+    let providerCalled = false;
+    const prisma = createPrisma({ findClaimById: async () => null });
+    const service = new ClaimsService(
+      prisma,
+      { evaluate: async () => { providerCalled = true; } },
+      {},
+    );
+
+    await withHttpApi(service, async (baseUrl) => {
+      const response = await postAssessment(baseUrl, {
+        claimId: 'missing-claim',
+        evidence: validRequest.evidence,
+      });
+      assert.equal(response.status, 404);
+    });
+    assert.equal(providerCalled, false);
+  });
+});
+
+test('HTTP: returns 400 for an invalid reassessment request', async () => {
+  await withProvider('demo', async () => {
+    let lookupCalled = false;
+    const service = new ClaimsService(
+      createPrisma({ findClaimById: async () => { lookupCalled = true; return null; } }),
+      {},
+      {},
+    );
+
+    await withHttpApi(service, async (baseUrl) => {
+      const response = await postAssessment(baseUrl, { claimId: 'claim-123' });
+      assert.equal(response.status, 400);
+    });
+    assert.equal(lookupCalled, false);
+  });
+});
+
+test('HTTP: returns 502 when the configured provider fails', async () => {
+  await withProvider('openai', async () => {
+    const service = new ClaimsService(
+      createPrisma(),
+      { evaluate: async () => { throw new Error('provider unavailable'); } },
+      {},
+    );
+
+    await withHttpApi(service, async (baseUrl) => {
+      const response = await postAssessment(baseUrl, validRequest);
+      assert.equal(response.status, 502);
+    });
+  });
+});
+
+test('HTTP: returns 504 when the provider times out', async () => {
+  await withProvider('openai', async () => {
+    const timeout = Object.assign(new Error('timed out'), { name: 'TimeoutError' });
+    const service = new ClaimsService(
+      createPrisma(),
+      { evaluate: async () => { throw timeout; } },
+      {},
+    );
+
+    await withHttpApi(service, async (baseUrl) => {
+      const response = await postAssessment(baseUrl, validRequest);
+      assert.equal(response.status, 504);
+    });
+  });
+});
+
+test('HTTP: returns 503 without exposing database details', async () => {
+  await withProvider('demo', async () => {
+    const service = new ClaimsService(
+      createPrisma({ saveAssessment: async () => { throw new Error('private connection string'); } }),
+      {},
+      {},
+    );
+
+    await withHttpApi(service, async (baseUrl) => {
+      const response = await postAssessment(baseUrl, validRequest);
+      const body = await response.text();
+      assert.equal(response.status, 503);
+      assert.equal(body.includes('private connection string'), false);
+    });
+  });
 });

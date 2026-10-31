@@ -1,4 +1,10 @@
-import { IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import {
+  IsOptional,
+  IsString,
+  MaxLength,
+  MinLength,
+  ValidateIf,
+} from 'class-validator';
 
 export class AssessClaimDto {
   @IsOptional()
@@ -7,11 +13,13 @@ export class AssessClaimDto {
   @MaxLength(100)
   claimId?: string;
 
+  @ValidateIf((request: AssessClaimDto) => !request.claimId)
   @IsString()
   @MinLength(8)
   @MaxLength(1000)
   claimText!: string;
 
+  @ValidateIf((request: AssessClaimDto) => !request.claimId)
   @IsString()
   @MinLength(1)
   @MaxLength(200)
