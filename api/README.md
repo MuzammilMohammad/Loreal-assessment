@@ -1,6 +1,6 @@
 # Claims API
 
-This is a standalone NestJS service. It validates claim and study evidence, requests an assessment from the provider selected in configuration (OpenAI or Google Gemini), and stores the claim and result in PostgreSQL through Prisma.
+This standalone NestJS service validates claim requests, calls the configured assessment provider, and stores each result in PostgreSQL with Prisma. `ClaimsController` handles HTTP routes, `ClaimsService` runs the assessment flow, the provider classes call OpenAI or Gemini, and `PrismaService` owns database access.
 
 ## Install and run
 
@@ -8,66 +8,83 @@ From this folder:
 
 ```powershell
 npm install
+Copy-Item .env.example .env
+```
+
+Set `DATABASE_URL` and choose `AI_PROVIDER` in `.env`. Add a provider key if using OpenAI or Gemini. Then run:
+
+```powershell
 npm run dev
 ```
 
-`npm install` generates Prisma Client once as part of installation. `npm run dev` starts the local PostgreSQL process if needed, applies migrations, and runs NestJS in watch mode on port 3000. It does not regenerate Prisma Client on every startup, which avoids Windows file-lock errors when Prisma's query engine is in use. Set `AI_PROVIDER` to `openai` or `gemini` and add that provider’s key to `.env`; see `.env.example`. The example defaults to OpenAI because that is what the assignment requests. Your local `.env` stays configured for Gemini until you choose to switch.
+The command starts the local PostgreSQL helper, applies committed migrations, and runs NestJS in watch mode on port 3000. The helper skips startup when the database host is not local. You can also use Docker with `docker compose up -d`, or point `DATABASE_URL` to a hosted PostgreSQL database.
 
-The web app is a separate project in `../web`. It calls this API using its own `VITE_API_URL` setting.
+For local web development, requests from localhost are allowed on Vite's default port and fallback ports. For production, set `WEB_ORIGIN` to the exact web origin or a comma-separated list.
 
-For local development, the API accepts browser requests from `localhost` and `127.0.0.1` on any port. This covers Vite's fallback to port 5174 when 5173 is busy. In production, set `WEB_ORIGIN` to the exact frontend origin or comma-separated list of origins.
+## Routes
 
-## Request flow
+### `POST /api/claims/assess`
 
-1. `POST /api/claims/assess` receives a proposed claim and evidence summary.
-2. The global `ValidationPipe` applies the rules in `src/claims/dto/assess-claim.dto.ts`.
-3. `ClaimsService` calls the provider selected by `AI_PROVIDER` and asks for structured JSON. With `AI_PROVIDER="demo"`, it returns a clearly labeled `INCONCLUSIVE` demo result.
-4. The service validates the verdict and confidence, then saves a Claim and related Assessment through Prisma.
-5. The API returns the saved record to the caller.
+Send `productName`, `claimText`, `evidence`, and optional `population`. The API creates a Claim and its first Assessment and returns the saved rows.
 
-This assessment route is POST-only because it requires a JSON body. Opening it in a browser address bar sends GET and returns 404; use the web form or an API client.
+To add a new assessment to an existing claim, include its `claimId` in the same request. A missing ID returns 404 before calling the model. Each successful request adds an Assessment and keeps the claim's existing history.
 
-`GET /api/claims` returns saved claims with the latest assessment summary. The React review-history list calls it.
+### `GET /api/claims`
 
-`GET /api/claims/:id/assessments` returns a selected claim and its saved assessments, newest first. The React UI calls it when a saved claim is expanded.
+Returns saved claims with their latest assessment summary. The React review-history panel uses this route.
+
+### `GET /api/claims/:id/assessments`
+
+Returns one claim and all its assessments, newest first. The React UI calls it when the user expands a saved claim. A claim that does not exist returns 404.
+
+The assessment route is POST-only because it expects a JSON request body. Visiting it in a browser address bar sends GET and returns 404; use the web form or an API client.
+
+## Assessment flow
+
+1. The global `ValidationPipe` checks the DTO and rejects undeclared fields.
+2. If `claimId` is supplied, the API checks that the claim exists.
+3. `ClaimsService` calls the selected provider, or produces a clearly marked result if `AI_PROVIDER=demo`.
+4. Provider output is parsed and validated before saving.
+5. `PrismaService` saves a new Claim and its first Assessment together, or connects a new Assessment to the selected existing Claim.
+6. The API returns the saved record to the web app.
+
+OpenAI and Gemini requests have a 30-second timeout. Missing keys, invalid model output, timeouts, and database failures return errors; a real provider failure is not converted into a demo result. Demo mode is marked with `isDemo: true` and uses the `local-demo` model label.
 
 ## Data model
 
 - **Claim:** claim wording, product name, optional target population, and creation time.
-- **Assessment:** evidence summary, verdict, confidence, reasoning, limitations, model name, demo flag, and creation time. One claim can have multiple assessments.
+- **Assessment:** evidence summary, verdict, confidence, reasoning, limitations, model, demo flag, and creation time.
+- **Relationship:** one Claim can have multiple Assessments. Each Assessment has a required foreign key to one Claim.
 
-The Prisma schema and migrations are under `prisma/`. Do not send patient-identifiable information.
+Do not submit patient-identifiable information. The system stores the supplied evidence summary for review history.
 
-## API and database commands
-
-Run commands from this `api` folder:
+## Commands
 
 | Command | What it does |
 | --- | --- |
-| `npm install` | Install dependencies and generate Prisma Client |
-| `npm run dev` | Start/check PostgreSQL, apply committed migrations, and run the API |
-| `npm run db:generate` | Regenerate Prisma Client after editing the Prisma schema; stop the API first on Windows |
+| `npm install` | Install packages and generate Prisma Client |
+| `npm run dev` | Start/check local PostgreSQL, apply migrations, and run the API |
+| `npm run build` | Compile NestJS into `dist` |
+| `npm test` | Build and run the backend behavior tests |
+| `npm run db:generate` | Regenerate Prisma Client after editing the schema; stop the API first on Windows |
+| `npm run db:migrate -- --name <change>` | Create and apply a development migration |
 | `npm run db:deploy` | Apply committed migrations |
-| `npm run db:migrate -- --name <change>` | Create a development migration |
-| `npm run db:studio` | Open Prisma Studio to view database rows |
-| `npm run db:local:start` | Start this PC's local PostgreSQL process |
+| `npm run db:studio` | Open Prisma Studio to inspect rows |
+| `npm run db:local:start` | Start the local PostgreSQL process |
 | `npm run db:local:stop` | Stop it without deleting records |
 
-The local PostgreSQL files are stored outside this project under `Documents/Codex/.local-services/postgres`. For Docker, run `docker compose up -d` from this folder. For a hosted database, set its SSL-enabled `DATABASE_URL` in `.env`; the local helper skips startup for a non-local host.
+The local PostgreSQL files are kept outside the project under `Documents/Codex/.local-services/postgres`.
 
-Set `AI_PROVIDER="openai"` with `OPENAI_API_KEY` to use OpenAI, or `AI_PROVIDER="gemini"` with `GEMINI_API_KEY` to use Gemini. Defaults are `gpt-4o-mini` and `gemini-3.5-flash-lite`; change the matching model variable if your account has different model access. Setting `AI_PROVIDER="demo"` disables model calls. Provider credentials stay in `api/.env`; do not put real keys in `.env.example`, frontend code, or source control. A key alone does not guarantee API quota or billing access.
+## Provider settings
 
-To try OpenAI locally, set `AI_PROVIDER="openai"`, paste your replacement key into `OPENAI_API_KEY`, and restart the API. To switch back to Gemini, set `AI_PROVIDER="gemini"`. No frontend changes or extra npm package are needed.
+Set `AI_PROVIDER="openai"` and `OPENAI_API_KEY` to use OpenAI. The default model is `gpt-4o-mini`. Set `AI_PROVIDER="gemini"` and `GEMINI_API_KEY` to use Gemini; the default model is `gemini-3.5-flash-lite`. Set `AI_PROVIDER="demo"` to avoid external model calls. No extra provider package is required because the integrations use Node's built-in `fetch`.
 
-Provider code is separated so the choice stays easy to follow:
+Keep API keys in this project's `.env`. Never put them in React configuration, `.env.example`, source files, or Git. A ChatGPT subscription does not itself provide API quota; confirm the API account has access and billing/quota available.
 
-- `src/claims/providers/openai-assessment.provider.ts` contains the OpenAI request and response handling.
-- `src/claims/providers/gemini-assessment.provider.ts` contains the Gemini request and response handling.
-- `src/claims/common/assessment.ts` contains shared assessment types, instructions, validation, and error helpers.
-- `src/claims/claims.service.ts` selects the provider and owns the shared assessment flow and database saving.
+## Tests
 
-After testing, you can remove the provider you do not want. Delete its file under `src/claims/providers/`, remove its import and constructor argument from `ClaimsService`, and remove its provider/model case from `ClaimsService` and `AssessmentProviderName`. Then remove that provider’s environment settings. Neither provider needs an extra npm package; both use Node’s built-in `fetch`.
+`npm test` covers DTO validation, successful creation, reassessment of an existing claim, missing claim IDs, provider failure and timeout, invalid model output, database failure, and multiple assessments staying attached to one claim. Tests use the Node built-in test runner and do not require PostgreSQL or API keys.
 
-## Limitations
+## Limits
 
-Model output is decision support, not scientific or regulatory approval. Confidence is not calibrated against expert-reviewed cases. A production service should add report-page citations, evaluator sign-off, a versioned rubric, audit history, privacy controls, and monitoring.
+The model receives a user-provided text summary. It cannot check the original study report, authenticate source data, or grant scientific/regulatory approval. Confidence is not calibrated against expert-reviewed results. A qualified evaluator must review the result.

@@ -4,6 +4,7 @@ import type { ClaimFormValues } from '../types/assessment';
 type ClaimFormProps = {
   values: ClaimFormValues;
   loading: boolean;
+  reassessing: boolean;
   error: string;
   onChange: (field: keyof ClaimFormValues, value: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
@@ -12,6 +13,7 @@ type ClaimFormProps = {
 export default function ClaimForm({
   values,
   loading,
+  reassessing,
   error,
   onChange,
   onSubmit,
@@ -71,8 +73,16 @@ export default function ClaimForm({
         patient-identifiable information.
       </p>
 
+      {reassessing && (
+        <p className="reassessment-note">This will be saved as a new assessment for the selected claim.</p>
+      )}
+
       <button type="submit" disabled={loading}>
-        {loading ? 'Reviewing evidence…' : 'Assess this claim'}
+        {loading
+          ? 'Reviewing evidence…'
+          : reassessing
+            ? 'Assess this claim again'
+            : 'Assess this claim'}
         <span>↗</span>
       </button>
 

@@ -1,6 +1,6 @@
 # Claims Web App
 
-This is a standalone React and Vite application for evaluators. It collects a proposed product claim and study summary, sends them to the Claims API, and displays the returned verdict, confidence, reasoning, and limitations.
+This standalone React and Vite app is the evaluator's interface for submitting a claim and study summary, reading the assessment, and reviewing saved results.
 
 ## Install and run
 
@@ -11,18 +11,24 @@ npm install
 npm run dev
 ```
 
-Open the URL printed by Vite (usually <http://localhost:5173>). The API must be running separately from `../api`. Local `/api` requests are proxied to `http://localhost:3000`, so they continue to work if Vite selects another port. Set `VITE_API_URL` in `.env` only when the API is hosted at a different origin; leave it empty for local development.
+Open the URL printed by Vite, normally `http://localhost:5173`. The API must run separately from `../api`. Local `/api` requests are proxied to `http://localhost:3000`. Set `VITE_API_URL` in `.env` only when the API is hosted at a different origin.
 
-## Request behavior
+## What the interface does
 
-The form sends `POST {VITE_API_URL}/api/claims/assess`. The API key and database connection are configured only in the API project; the browser app never receives those secrets.
+- Checks required form fields and disables submission while the API request is running.
+- Displays the verdict, confidence, reasoning, evidence limitations, and whether the response came from demo mode.
+- Loads saved claims and fetches assessment details when a claim is expanded.
+- Lets the evaluator start another assessment for a saved claim. The next request includes its `claimId`, so it adds to that claim's history.
 
-The sample form values are illustrative. Submit de-identified study summaries only and do not enter patient-identifiable data.
+The browser never receives the model key or database URL. Use de-identified study summaries only.
 
 ## Code layout
 
-- `src/main.tsx` contains form state, the API request, and result rendering.
+- `src/App.tsx` owns form state and the assessment request.
+- `src/components/ClaimForm.tsx` renders the submission form.
+- `src/components/AssessmentPanel.tsx` renders the latest assessment result.
+- `src/components/SavedClaims.tsx` loads claims and their expanded assessment history.
+- `src/types/assessment.ts` defines the API response shapes.
 - `src/style.css` contains the page layout and responsive styles.
-- `vite.config.ts` configures the local web server.
 
-The web app can be built independently with `npm run build`.
+Build the app with `npm run build`. This runs the TypeScript project check and Vite production build.

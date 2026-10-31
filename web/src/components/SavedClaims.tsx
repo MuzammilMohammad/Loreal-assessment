@@ -37,9 +37,10 @@ async function readResponse<T>(response: Response): Promise<T> {
 
 type SavedClaimsProps = {
   refreshKey: number;
+  onAssessAgain: (claim: ClaimSummary) => void;
 };
 
-export default function SavedClaims({ refreshKey }: SavedClaimsProps) {
+export default function SavedClaims({ refreshKey, onAssessAgain }: SavedClaimsProps) {
   const [claims, setClaims] = useState<ClaimSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -141,6 +142,13 @@ export default function SavedClaims({ refreshKey }: SavedClaimsProps) {
 
                 {isExpanded && (
                   <div className="saved-claim-details">
+                    <button
+                      className="reassess-button"
+                      type="button"
+                      onClick={() => onAssessAgain(claim)}
+                    >
+                      Assess this claim again
+                    </button>
                     {loadingHistory && !details && <p className="saved-message">Loading assessment details…</p>}
                     {historyError && <p className="error" role="alert">{historyError}</p>}
                     {details?.population && <p><strong>Target population</strong><br />{details.population}</p>}

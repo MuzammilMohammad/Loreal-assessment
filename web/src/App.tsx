@@ -7,6 +7,7 @@ import SavedClaims from './components/SavedClaims';
 import { sampleClaim } from './data/sampleClaim';
 import type {
   AssessmentResponse,
+  ClaimSummary,
   ClaimFormValues,
 } from './types/assessment';
 
@@ -18,9 +19,26 @@ export default function App() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [listRefreshKey, setListRefreshKey] = useState(0);
+  const [reassessmentClaimId, setReassessmentClaimId] = useState<string | null>(null);
 
   function handleChange(field: keyof ClaimFormValues, value: string) {
+    if (field !== 'evidence') {
+      setReassessmentClaimId(null);
+    }
     setFormValues((currentValues) => ({ ...currentValues, [field]: value }));
+  }
+
+  function handleAssessAgain(claim: ClaimSummary) {
+    setFormValues({
+      claimText: claim.text,
+      productName: claim.productName,
+      population: claim.population ?? '',
+      evidence: '',
+    });
+    setReassessmentClaimId(claim.id);
+    setError('');
+    setResult(null);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -33,7 +51,10 @@ export default function App() {
       const response = await fetch(`${API_BASE_URL}/api/claims/assess`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formValues),
+        body: JSON.stringify({
+          ...formValues,
+          ...(reassessmentClaimId ? { claimId: reassessmentClaimId } : {}),
+        }),
       });
 
       const responseText = await response.text();
@@ -65,6 +86,7 @@ export default function App() {
       }
 
       setResult(data as AssessmentResponse);
+      setReassessmentClaimId(data.claimId);
       setListRefreshKey((currentKey) => currentKey + 1);
     } catch (submitError) {
       setError(
@@ -85,6 +107,7 @@ export default function App() {
         <ClaimForm
           values={formValues}
           loading={loading}
+          reassessing={Boolean(reassessmentClaimId)}
           error={error}
           onChange={handleChange}
           onSubmit={handleSubmit}
@@ -92,7 +115,10 @@ export default function App() {
         <AssessmentPanel result={result} />
       </div>
 
-      <SavedClaims refreshKey={listRefreshKey} />
+      <SavedClaims
+        refreshKey={listRefreshKey}
+        onAssessAgain={handleAssessAgain}
+      />
 
       <PageFooter />
     </main>

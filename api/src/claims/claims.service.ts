@@ -1,5 +1,6 @@
 import {
   BadGatewayException,
+  GatewayTimeoutException,
   Injectable,
   Logger,
   NotFoundException,
@@ -10,6 +11,7 @@ import { AssessClaimDto } from './dto/assess-claim.dto';
 import {
   getErrorCode,
   getErrorStatus,
+  isTimeoutError,
   type AssessmentProviderName,
   type Evaluation,
 } from './common/assessment';
@@ -27,22 +29,51 @@ export class ClaimsService {
   ) {}
 
   async assess(dto: AssessClaimDto) {
+    let assessmentInput = dto;
+    if (dto.claimId) {
+      let existingClaim: Awaited<ReturnType<PrismaService['findClaimById']>>;
+      try {
+        existingClaim = await this.prisma.findClaimById(dto.claimId);
+      } catch (error) {
+        throw this.databaseUnavailable(error);
+      }
+
+      if (!existingClaim) {
+        throw new NotFoundException('Claim not found');
+      }
+
+      assessmentInput = {
+        ...dto,
+        claimText: existingClaim.text,
+        productName: existingClaim.productName,
+        population: existingClaim.population ?? undefined,
+      };
+    }
+
     const provider = this.getProvider();
     let evaluation: Evaluation;
 
     if (provider === 'demo') {
-      evaluation = this.demoEvaluate(dto);
+      evaluation = this.demoEvaluate(assessmentInput);
     } else {
       try {
         evaluation =
           provider === 'openai'
-            ? await this.openAI.evaluate(dto)
-            : await this.gemini.evaluate(dto);
+            ? await this.openAI.evaluate(assessmentInput)
+            : await this.gemini.evaluate(assessmentInput);
       } catch (error) {
+        const providerName = provider === 'openai' ? 'OpenAI' : 'Gemini';
+        const status = getErrorStatus(error);
+        if (isTimeoutError(error) || status === '408' || status === '504') {
+          this.logger.error(`${providerName} assessment timed out.`);
+          throw new GatewayTimeoutException(
+            `${providerName} assessment timed out. Please try again.`,
+          );
+        }
+
         const details = [getErrorStatus(error), getErrorCode(error)]
           .filter(Boolean)
           .join(', ');
-        const providerName = provider === 'openai' ? 'OpenAI' : 'Gemini';
         const message = details
           ? `${providerName} assessment failed (${details}). Check the API key, model access, and account quota or billing.`
           : `${providerName} assessment failed. Check the API terminal for details.`;
@@ -55,22 +86,17 @@ export class ClaimsService {
     let savedClaim: Awaited<ReturnType<PrismaService['saveAssessment']>>;
     try {
       savedClaim = await this.prisma.saveAssessment({
-        claimText: dto.claimText,
-        productName: dto.productName,
-        population: dto.population,
+        claimId: dto.claimId,
+        claimText: assessmentInput.claimText,
+        productName: assessmentInput.productName,
+        population: assessmentInput.population,
         evidence: dto.evidence,
         ...evaluation,
         model: this.getModel(provider),
         isDemo: provider === 'demo',
       });
     } catch (error) {
-      const code = getErrorCode(error);
-      this.logger.error(
-        `Could not save the assessment to the database${code ? ` (${code})` : ''}.`,
-      );
-      throw new ServiceUnavailableException(
-        'The assessment could not be saved. Check the API terminal for the database error.',
-      );
+      throw this.databaseUnavailable(error);
     }
 
     return {
@@ -82,7 +108,12 @@ export class ClaimsService {
   }
 
   async list() {
-    const claims = await this.prisma.findAllClaims();
+    let claims: Awaited<ReturnType<PrismaService['findAllClaims']>>;
+    try {
+      claims = await this.prisma.findAllClaims();
+    } catch (error) {
+      throw this.databaseUnavailable(error);
+    }
 
     return {
       claims: claims.map(({ assessments, ...claim }) => ({
@@ -93,7 +124,12 @@ export class ClaimsService {
   }
 
   async history(claimId: string) {
-    const claim = await this.prisma.findClaimHistory(claimId);
+    let claim: Awaited<ReturnType<PrismaService['findClaimHistory']>>;
+    try {
+      claim = await this.prisma.findClaimHistory(claimId);
+    } catch (error) {
+      throw this.databaseUnavailable(error);
+    }
 
     if (!claim) {
       throw new NotFoundException('Claim not found');
@@ -152,5 +188,15 @@ export class ClaimsService {
         'The supplied study evidence has not been scientifically evaluated.',
       ],
     };
+  }
+
+  private databaseUnavailable(error: unknown): ServiceUnavailableException {
+    const code = getErrorCode(error);
+    this.logger.error(
+      `Database operation failed${code ? ` (${code})` : ''}.`,
+    );
+    return new ServiceUnavailableException(
+      'The database operation failed. Check the API terminal for details.',
+    );
   }
 }

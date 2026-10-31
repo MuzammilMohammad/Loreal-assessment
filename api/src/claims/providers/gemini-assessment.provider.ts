@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import {
   ASSESSMENT_PROMPT,
+  AI_REQUEST_TIMEOUT_MS,
   type AssessmentInput,
   type Evaluation,
   parseEvaluation,
@@ -30,6 +31,7 @@ export class GeminiAssessmentProvider {
           'Content-Type': 'application/json',
           'x-goog-api-key': apiKey,
         },
+        signal: AbortSignal.timeout(AI_REQUEST_TIMEOUT_MS),
         body: JSON.stringify({
           systemInstruction: { parts: [{ text: ASSESSMENT_PROMPT }] },
           contents: [
@@ -67,7 +69,16 @@ export class GeminiAssessmentProvider {
       },
     );
 
-    const result = (await response.json()) as GeminiResponse;
+    let result: GeminiResponse;
+    try {
+      result = (await response.json()) as GeminiResponse;
+    } catch {
+      const error = new Error(
+        response.ok ? 'Gemini returned an unreadable response.' : 'Gemini request failed.',
+      );
+      if (!response.ok) Object.assign(error, { status: response.status });
+      throw error;
+    }
     if (!response.ok) {
       const error = new Error(result.error?.message ?? 'Gemini request failed.');
       Object.assign(error, {

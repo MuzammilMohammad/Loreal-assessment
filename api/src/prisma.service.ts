@@ -9,6 +9,7 @@ import { PrismaClient } from '@prisma/client';
 type AssessmentVerdict = 'JUSTIFIED' | 'NOT_JUSTIFIED' | 'INCONCLUSIVE';
 
 type AssessmentInput = {
+  claimId?: string;
   claimText: string;
   productName: string;
   population?: string;
@@ -40,28 +41,59 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   }
 
   async saveAssessment(input: AssessmentInput) {
+    const assessmentData = {
+      evidence: input.evidence,
+      verdict: input.verdict,
+      confidence: input.confidence,
+      reasoning: input.reasoning,
+      limitations: input.limitations,
+      model: input.model,
+      isDemo: input.isDemo,
+    };
+
+    if (input.claimId) {
+      const assessment = await this.client.assessment.create({
+        data: {
+          ...assessmentData,
+          claim: { connect: { id: input.claimId } },
+        },
+        include: { claim: true },
+      });
+      const { claim, ...savedAssessment } = assessment;
+      return { ...claim, assessment: savedAssessment };
+    }
+
     const claim = await this.client.claim.create({
       data: {
         text: input.claimText,
         productName: input.productName,
         population: input.population,
         assessments: {
-          create: {
-            evidence: input.evidence,
-            verdict: input.verdict,
-            confidence: input.confidence,
-            reasoning: input.reasoning,
-            limitations: input.limitations,
-            model: input.model,
-            isDemo: input.isDemo,
-          },
+          create: assessmentData,
         },
       },
-      include: { assessments: true },
+      include: {
+        assessments: {
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+        },
+      },
     });
 
     const { assessments, ...savedClaim } = claim;
     return { ...savedClaim, assessment: assessments[0] };
+  }
+
+  async findClaimById(id: string) {
+    return this.client.claim.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        text: true,
+        productName: true,
+        population: true,
+      },
+    });
   }
 
   async findAllClaims() {
